@@ -1,0 +1,28 @@
+# 用 uv 管理环境：`uv sync` 按 uv.lock 精确还原，`uv run python train.py ...` 运行。
+[project]
+name = "{{PROJECT_NAME}}"
+version = "0.1.0"
+description = "科研实验项目（research-code-skills 脚手架生成）"
+requires-python = ">=3.10"
+dependencies = [
+    "torch>=2.0",
+    "numpy>=1.24",
+    "pyyaml>=6.0",
+    "matplotlib>=3.7",
+    "tqdm>=4.66",
+]
+
+[dependency-groups]
+# 开发期工具，用 `uv sync --group dev` 安装
+dev = [
+    "ruff>=0.4",
+    "pytest>=8.0",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B"]  # 基础错误 + import 排序 + 常见 bug 模式
+ignore = ["E501"]             # 行长交给 formatter，不当硬错误

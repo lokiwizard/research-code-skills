@@ -1,0 +1,20 @@
+# 实验产物不进版本库（体积大、可重跑），但保留目录
+experiments/*
+!experiments/.gitkeep
+results/*
+!results/.gitkeep
+
+# 自动生成的消融配置（可由 make_ablation.py 重建）
+configs/ablations/*
+!configs/ablations/.gitkeep
+
+# Python / uv
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# 系统
+.DS_Store

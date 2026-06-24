@@ -1,0 +1,7 @@
+# 给不用 uv 的同学/机器作兜底：pip install -r requirements.txt
+# 首选仍是 uv（见 README）。这里只列运行所需的核心依赖。
+torch>=2.0
+numpy>=1.24
+pyyaml>=6.0
+matplotlib>=3.7
+tqdm>=4.66

@@ -1,0 +1,40 @@
+# 基线配置（single source of truth）。
+# 一切超参都写在这里；想临时改用 `--set key.path=value`，不要在代码里写死数字。
+# 每个字段都标注了含义，新人也能看懂每个数字在控制什么。
+
+experiment:
+  name: baseline          # 实验名；实验目录会是 <name>_<时间戳>_<配置哈希>
+  seed: 42                # 全局随机种子，复现的前提（固定 Python/NumPy/Torch）
+  output_root: experiments  # 实验产物的根目录，每次运行在其下建一个子目录
+
+# 模型：name 对应 models/ 里的类名，其余字段是它的构造参数
+model:
+  name: MLP               # 用哪个模型（models/__init__.py 的 _MODELS 字典里的 key）
+  in_dim: 16              # 输入特征维度（要和数据集的 in_dim 一致）
+  hidden_dim: 64          # 隐藏层宽度，越大容量越强、越易过拟合
+  out_dim: 1              # 输出维度（回归任务为 1）
+  depth: 2               # 隐藏层层数（>=1），越深表达力越强、越难训
+
+# 数据集：name 对应 datasets/ 里的类名
+dataset:
+  name: SyntheticRegression  # 用哪个数据集
+  n_samples: 2000         # 样本总数
+  in_dim: 16              # 输入维度（需与 model.in_dim 一致）
+  noise: 0.1              # 合成数据的高斯噪声标准差，越大任务越难
+  seed: 0                 # 数据生成种子，与训练种子分开，保证数据本身可复现
+
+# 损失：name 对应 losses/ 里的类名
+loss:
+  name: MSELoss           # 用哪个损失（换成 CombinedLoss 可引入 alpha 超参做消融）
+
+# 训练超参
+train:
+  epochs: 20              # 训练总轮数
+  batch_size: 64          # 每个 batch 的样本数
+  lr: 1.0e-3              # 学习率（Adam）
+  val_split: 0.2          # 验证集占比（0~1），从训练集里切出来
+  device: auto            # 计算设备：auto 自动选 cuda/cpu，也可写死 cpu / cuda
+  log_interval: 1         # 每多少个 epoch 打印一次日志
+  ckpt_interval: 10       # 每多少个 epoch 存一次"周期 checkpoint"（0 表示不存周期档）
+  monitor_metric: mse     # 用哪个指标挑 best.pt（对应 utils/metrics.py 的 key）
+  monitor_mode: min       # 监控指标方向：min=越小越好（loss），max=越大越好（准确率/PSNR）
