@@ -31,10 +31,20 @@ loss:
 train:
   epochs: 20              # 训练总轮数
   batch_size: 64          # 每个 batch 的样本数
-  lr: 1.0e-3              # 学习率（Adam）
+  optimizer:
+    name: Adam            # 优化器（trainers/optim.py 的 _OPTIMIZERS：Adam/AdamW/SGD）
+    lr: 1.0e-3            # 学习率；name 之外的字段都直接传给优化器构造函数
+    # weight_decay: 0.0   # 需要时解开注释；SGD 的 momentum 等同理加在这里
+  scheduler:
+    name: none            # 学习率调度：none 不调度；可选 StepLR / CosineAnnealingLR
+    # name: CosineAnnealingLR
+    # T_max: 20           # name 之外的字段直接传给调度器构造函数
   val_split: 0.2          # 验证集占比（0~1），从训练集里切出来
+  num_workers: 0          # DataLoader 工作进程数；图像等重预处理任务建议调到 4/8
+  pin_memory: false       # cuda 训练时设 true 可加速 host->GPU 拷贝
   device: auto            # 计算设备：auto 自动选 cuda/cpu，也可写死 cpu / cuda
   log_interval: 1         # 每多少个 epoch 打印一次日志
   ckpt_interval: 10       # 每多少个 epoch 存一次"周期 checkpoint"（0 表示不存周期档）
+  ckpt_keep: 3            # 周期档滚动保留最近几个，旧的自动删（0 表示全保留；best/last 不受影响）
   monitor_metric: mse     # 用哪个指标挑 best.pt（对应 utils/metrics.py 的 key）
   monitor_mode: min       # 监控指标方向：min=越小越好（loss），max=越大越好（准确率/PSNR）

@@ -40,7 +40,7 @@ uv run python train.py --config configs/default.yaml
 uv run python train.py --config configs/default.yaml
 
 # 2) 临时改超参，不动配置文件
-uv run python train.py --config configs/default.yaml --set train.lr=5e-4 model.depth=4
+uv run python train.py --config configs/default.yaml --set train.optimizer.lr=5e-4 model.depth=4
 
 # 3) 生成一组消融配置（逐一变量），再逐条训练
 uv run python scripts/make_ablation.py --base configs/default.yaml --mode oat \
@@ -61,6 +61,10 @@ uv run python train.py --resume experiments/<实验目录>
 
 训练时用 **tqdm 进度条**实时显示每个 epoch 的 batch 进度与运行平均 loss；
 每个 epoch 自动覆盖一份 `checkpoints/last.pt`，断了用 `--resume` 即可续上。
+
+checkpoint 不做全量累积，磁盘占用可控：`last.pt` 每 epoch 覆盖（含优化器，续训用）、
+`best.pt` 指标刷新时更新（只存权重，评估用）、`epoch_*.pt` 周期档滚动保留最近
+`train.ckpt_keep` 个（旧的自动删，设 0 可全保留）。
 
 ## 怎么扩展（关键在解耦）
 

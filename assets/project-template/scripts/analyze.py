@@ -200,8 +200,13 @@ def cmd_curves(exps: List[Experiment], out_dir: Path, metric: str) -> None:
 
 
 def cmd_sweep(exps: List[Experiment], out_dir: Path, x: str, y: str,
-              x2: Optional[str]) -> None:
-    """指标 vs 超参 的消融图：一维画曲线，二维画 3D 曲面。"""
+              x2: Optional[str], mode: str = "min") -> None:
+    """指标 vs 超参 的消融图：一维画曲线，二维画 3D 曲面。
+
+    mode 决定 caption 里"最优"怎么标：min=指标越小越好（loss/MSE），
+    max=越大越好（PSNR/Accuracy/R²）。
+    """
+    pick_best = np.argmin if mode == "min" else np.argmax
     points = []
     for e in exps:
         xv, yv = e.hyper(x), e.metric(y)
@@ -225,7 +230,7 @@ def cmd_sweep(exps: List[Experiment], out_dir: Path, x: str, y: str,
         ax.set_title(f"{y} vs {x}")
         ax.grid(True, alpha=0.3)
         savefig(fig, out_dir / f"sweep_{y}_vs_{x.replace('.', '-')}.png")
-        best_i = int(np.argmin(ys))  # 默认按"越小越好"标注最优
+        best_i = int(pick_best(ys))
         write_caption(
             out_dir / f"sweep_{y}_vs_{x.replace('.', '-')}.md",
             f"图：{y} 随超参 {x} 的变化（消融）。在 {x}={xs[best_i]} 时取得"
@@ -246,7 +251,7 @@ def cmd_sweep(exps: List[Experiment], out_dir: Path, x: str, y: str,
         ax.set_title(f"{y} over ({x}, {x2})")
         out_path = out_dir / f"surface_{y}_{x.replace('.', '-')}_{x2.replace('.', '-')}.png"
         savefig(fig, out_path)
-        best_i = int(np.argmin(ys))
+        best_i = int(pick_best(ys))
         write_caption(
             out_path.with_suffix(".md"),
             f"图：{y} 关于 {x} 与 {x2} 的二维消融曲面。最优点出现在 "
@@ -274,6 +279,8 @@ def main() -> None:
     p_sw.add_argument("--x", required=True, help="超参点号路径，如 loss.alpha")
     p_sw.add_argument("--x2", default=None, help="第二个超参，给了就画 3D 曲面")
     p_sw.add_argument("--y", required=True, help="指标键，如 best_val_mse")
+    p_sw.add_argument("--mode", choices=["min", "max"], default="min",
+                      help="标注最优点的方向：min=loss/MSE 类，max=PSNR/Accuracy 类")
 
     args = parser.parse_args()
     exp_root = Path(args.exp_root)
@@ -289,7 +296,7 @@ def main() -> None:
     elif args.cmd == "curves":
         cmd_curves(exps, out_dir, args.metric)
     elif args.cmd == "sweep":
-        cmd_sweep(exps, out_dir, args.x, args.y, args.x2)
+        cmd_sweep(exps, out_dir, args.x, args.y, args.x2, args.mode)
 
 
 if __name__ == "__main__":

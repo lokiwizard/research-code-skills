@@ -2,7 +2,7 @@
 
 约定：
 - 一切超参都进 yaml，代码里不写死数字。
-- 支持命令行点号覆盖（`--set train.lr=1e-4`），方便快速试参而不改文件。
+- 支持命令行点号覆盖（`--set train.optimizer.lr=1e-4`），方便快速试参而不改文件。
 - 每次运行都把"最终生效的配置"存进实验目录，并算一个短哈希作为实验指纹，
   保证"看到结果 -> 找得到当时的配置"。
 """
@@ -47,7 +47,7 @@ def _coerce(value: str) -> Any:
 
 
 def apply_overrides(cfg: Dict[str, Any], overrides: List[str] | None) -> Dict[str, Any]:
-    """应用形如 ['train.lr=1e-4', 'model.depth=4'] 的覆盖，返回新字典。
+    """应用形如 ['train.optimizer.lr=1e-4', 'model.depth=4'] 的覆盖，返回新字典。
 
     用点号定位嵌套键；中间不存在的层会自动建出来。原配置不会被改动。
     """

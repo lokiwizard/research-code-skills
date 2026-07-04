@@ -8,7 +8,7 @@
 例子：
     # 对 lr 和 depth 做网格
     python scripts/make_ablation.py --base configs/default.yaml \\
-        --grid train.lr=1e-3,5e-4 model.depth=2,4
+        --grid train.optimizer.lr=1e-3,5e-4 model.depth=2,4
 
     # 对 alpha 逐一消融（先把 loss 换成 CombinedLoss）
     python scripts/make_ablation.py --base configs/default.yaml --mode oat \\
@@ -53,7 +53,7 @@ def set_by_path(cfg: Dict[str, Any], dotted: str, value: Any) -> None:
 
 
 def parse_grid(items: List[str]) -> List[Tuple[str, List[Any]]]:
-    """把 ['train.lr=1e-3,5e-4', 'model.depth=2,4'] 解析成 [(key, [值...]), ...]。"""
+    """把 ['train.optimizer.lr=1e-3,5e-4', 'model.depth=2,4'] 解析成 [(key, [值...]), ...]。"""
     grid = []
     for item in items:
         key, raw = item.split("=", 1)
@@ -103,7 +103,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="批量生成消融/超参配置")
     parser.add_argument("--base", required=True, help="基线 yaml")
     parser.add_argument("--grid", nargs="+", required=True,
-                        help="扫描项，如 train.lr=1e-3,5e-4 model.depth=2,4")
+                        help="扫描项，如 train.optimizer.lr=1e-3,5e-4 model.depth=2,4")
     parser.add_argument("--mode", choices=["grid", "oat"], default="grid",
                         help="grid=笛卡尔积；oat=每次只改一个变量（消融）")
     parser.add_argument("--set", nargs="*", default=[], dest="fixed",

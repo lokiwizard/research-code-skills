@@ -6,7 +6,7 @@
 
 常用：
     python train.py --config configs/default.yaml
-    python train.py --config configs/default.yaml --set train.lr=5e-4 model.depth=4
+    python train.py --config configs/default.yaml --set train.optimizer.lr=5e-4 model.depth=4
     python train.py --resume experiments/baseline_20260624-153000_a1b2c3   # 断点续训
 """
 
@@ -16,10 +16,9 @@ import argparse
 import json
 from pathlib import Path
 
-import torch
-from torch.utils.data import DataLoader, random_split
+from torch.utils.data import DataLoader
 
-from datasets import build_dataset
+from datasets import build_dataset, split_train_val
 from losses import build_loss
 from models import build_model
 from trainers import Trainer
@@ -35,17 +34,22 @@ from utils import (
 
 
 def build_dataloaders(cfg, seed):
-    """建数据集并按 val_split 切出训练/验证两个 DataLoader。"""
-    dataset = build_dataset(cfg["dataset"])
-    val_ratio = float(cfg["train"].get("val_split", 0.2))
-    n_val = int(len(dataset) * val_ratio)
-    n_train = len(dataset) - n_val
-    g = torch.Generator().manual_seed(seed)  # 切分也固定种子，保证划分可复现
-    train_set, val_set = random_split(dataset, [n_train, n_val], generator=g)
+    """建数据集并按 val_split 切出训练/验证两个 DataLoader。
 
-    batch_size = int(cfg["train"]["batch_size"])
-    train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True)
-    val_loader = DataLoader(val_set, batch_size=batch_size, shuffle=False)
+    切分走 datasets.split_train_val（固定种子），eval.py 用同一函数，
+    保证训练和评估看到完全相同的划分。
+    """
+    tcfg = cfg["train"]
+    dataset = build_dataset(cfg["dataset"])
+    train_set, val_set = split_train_val(dataset, float(tcfg.get("val_split", 0.2)), seed)
+
+    loader_kwargs = dict(
+        batch_size=int(tcfg["batch_size"]),
+        num_workers=int(tcfg.get("num_workers", 0)),   # 重预处理任务（图像等）调大
+        pin_memory=bool(tcfg.get("pin_memory", False)),  # cuda 下开了能加速 H2D 拷贝
+    )
+    train_loader = DataLoader(train_set, shuffle=True, **loader_kwargs)
+    val_loader = DataLoader(val_set, shuffle=False, **loader_kwargs)
     return train_loader, val_loader
 
 
@@ -60,6 +64,9 @@ def prepare_experiment(args):
         if not (exp_dir / "config.yaml").exists():
             raise SystemExit(f"续训目录里没有 config.yaml：{exp_dir}")
         cfg = apply_overrides(load_config(exp_dir / "config.yaml"), args.overrides)
+        if args.overrides:
+            # 覆盖项也要落盘，config.yaml 必须始终等于"实际生效的配置"（可追溯原则）
+            save_config(cfg, exp_dir / "config.yaml")
         return cfg, exp_dir, True
 
     if not args.config:
@@ -78,7 +85,7 @@ def main() -> None:
     parser.add_argument("--resume", default=None,
                         help="断点续训：传入已有实验目录，从 last.pt 接着训")
     parser.add_argument("--set", nargs="*", default=[], dest="overrides",
-                        help="命令行覆盖，如 train.lr=1e-4 model.depth=4")
+                        help="命令行覆盖，如 train.optimizer.lr=1e-4 model.depth=4")
     args = parser.parse_args()
 
     # 1) 配置与实验目录（区分新实验 / 续训）

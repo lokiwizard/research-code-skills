@@ -48,7 +48,14 @@ def build_model(cfg):
 
 - 实验目录名 = `<experiment.name>_<时间戳>_<配置哈希>`：分别回答"哪个实验/何时跑/什么配置"。
 - 每次运行落盘：`config.yaml`（当时生效的完整配置）、`train.log`、`metrics.csv`、
-  `metrics.json`、`checkpoints/best.pt`（+ 可选周期 checkpoint）。
+  `metrics.json`、`checkpoints/`。
+- checkpoint 策略（控制磁盘占用，不做全量累积）：`last.pt` 每 epoch 覆盖（含优化器/
+  调度器/RNG 状态，续训入口）；`best.pt` 指标刷新时更新（只存权重，评估用）；
+  `epoch_*.pt` 每 `ckpt_interval` 存一份、滚动保留最近 `ckpt_keep` 个（旧档自动删）。
+- 续训是严格复现：RNG 状态随 checkpoint 保存/恢复，"中断后 `--resume`"与"一口气跑完"
+  的随机序列一致；续训时的 `--set` 覆盖会写回实验目录的 `config.yaml`（配置始终等于实际生效值）。
+- train/val 划分收敛在 `datasets.split_train_val`（固定种子），`train.py` 与 `eval.py`
+  共用，评估默认在验证集上（`eval.py --split val`），不会把训练样本混进指标。
 - 复现三件套：**固定种子**（`utils/seed.py` 覆盖 Python/NumPy/Torch）、**保存配置**、**锁依赖**（`uv.lock`）。
 - 数据划分也用独立种子，保证 train/val 切分可复现。
 
@@ -57,5 +64,6 @@ def build_model(cfg):
 1. 把 `datasets/synthetic.py` 换成你的数据集（实现 `__len__`/`__getitem__`），更新 `_DATASETS`。
 2. 把 `models/mlp.py` 换成你的模型，更新 `_MODELS`。
 3. 在 `utils/metrics.py` 加你任务的指标（如 PSNR/SSIM/Accuracy），签名保持 `f(pred, target)->float`。
-4. 按需在 `trainers/trainer.py` 调整训练循环（如加学习率调度、梯度裁剪）。
+4. 优化器/学习率调度已可配置（`train.optimizer` / `train.scheduler`，选项在
+   `trainers/optim.py` 的字典里加）；梯度裁剪、AMP 等再按需改 `trainers/trainer.py`。
 5. 更新 `configs/default.yaml` 的各 `name` 与超参。

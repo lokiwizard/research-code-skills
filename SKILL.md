@@ -76,10 +76,13 @@ python scripts/new_project.py <项目名> --dest <父目录> [--git] [--uv]
 └── pyproject.toml requirements.txt README.md .gitignore
 ```
 
-模板自带：CSV+文本日志、best/last/周期 checkpoint、**断点续训**（`--resume`）、
+模板自带：CSV+文本日志、best/last/周期 checkpoint（周期档**滚动保留**最近
+`ckpt_keep` 个、best 只存权重，不做全量累积，磁盘可控）、**断点续训**（`--resume`，
+RNG 状态随档保存，续训与一口气跑完结果一致）、优化器/学习率调度器从配置构建、
 **tqdm 进度条**、种子固定、`<name>_<时间戳>_<配置哈希>` 命名规则、合成数据让框架
 **开箱即跑**。生成后即可：`uv run python train.py --config configs/default.yaml`；
-中断后 `uv run python train.py --resume experiments/<某次实验>` 续训。
+中断后 `uv run python train.py --resume experiments/<某次实验>` 续训；评估
+`eval.py` 默认在与训练一致的验证集划分上算指标。
 
 布局、命名与复现约定的细节见 `references/scaffold-layout.md`。
 **优先用 `new_project.py` 生成再按需改**，不要手敲整套目录。

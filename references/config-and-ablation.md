@@ -6,7 +6,7 @@
 - 配置结构按"组件"分块：`experiment / model / dataset / loss / train`。每块的 `name`
   指向一个组件，其余字段就是该组件的构造参数——配置项和代码参数一一对应。
 - 三种改参方式，按"是否要留痕"选择：
-  - 临时试一下：`--set train.lr=5e-4 model.depth=4`（不改文件）。
+  - 临时试一下：`--set train.optimizer.lr=5e-4 model.depth=4`（不改文件）。
   - 要长期保留：复制 `default.yaml` 成新文件改。
   - 成组实验：用 `make_ablation.py` 批量生成。
 
@@ -29,7 +29,7 @@ python scripts/make_ablation.py --base configs/default.yaml --mode oat \
 
 # 对学习率 × 深度做网格搜索
 python scripts/make_ablation.py --base configs/default.yaml --mode grid \
-    --grid train.lr=1e-3,5e-4 model.depth=2,4
+    --grid train.optimizer.lr=1e-3,5e-4 model.depth=2,4
 ```
 
 - `--set`：先施加到基线上的固定改动（对所有生成的配置都生效）。
