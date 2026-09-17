@@ -1,13 +1,4 @@
-"""评估入口：加载某个实验的 best.pt，在验证集上算指标。
-
-    python eval.py --exp-dir experiments/baseline_20260624-153000_a1b2c3
-    python eval.py --exp-dir ... --split all      # 需要时也可评训练集/全集
-
-划分用与 train.py 同一个 split_train_val（同种子），保证评的验证集就是训练时
-看到的那一份——否则训练样本会混进来，指标虚高。之所以从实验目录读取，是因为
-目录里已经存着 config.yaml（怎么搭模型/数据）和 checkpoints/best.pt（权重），
-评估完全可复现，不依赖你记得当时的命令行。
-"""
+"""加载实验权重并评估指定数据划分。默认使用 best.pt 和验证集。"""
 
 from __future__ import annotations
 
@@ -48,7 +39,7 @@ def main() -> None:
     if args.split != "all":
         train_set, val_set = split_train_val(
             dataset, float(cfg["train"].get("val_split", 0.2)),
-            int(cfg["experiment"]["seed"]))
+            int(cfg["train"].get("split_seed", cfg["experiment"]["seed"])))
         dataset = val_set if args.split == "val" else train_set
     loader = DataLoader(dataset, batch_size=int(cfg["train"]["batch_size"]))
 
@@ -60,10 +51,13 @@ def main() -> None:
     pred_all, target_all = torch.cat(preds), torch.cat(targets)
 
     # split 一并写进 eval.json，回看时知道这组数字是在哪部分数据上算的
-    results = {"split": args.split,
+    results = {"split": args.split, "checkpoint": args.ckpt,
+               "epoch": state["epoch"], "n_samples": len(dataset),
                **{name: fn(pred_all, target_all) for name, fn in METRICS.items()}}
     print(json.dumps(results, ensure_ascii=False, indent=2))
-    with open(exp_dir / "eval.json", "w", encoding="utf-8") as f:
+    filename = ("eval.json" if args.split == "val" and args.ckpt == "best.pt"
+                else f"eval_{args.split}_{Path(args.ckpt).stem}.json")
+    with open(exp_dir / filename, "w", encoding="utf-8") as f:
         json.dump(results, f, ensure_ascii=False, indent=2)
 
 

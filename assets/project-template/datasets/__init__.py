@@ -32,6 +32,10 @@ def split_train_val(dataset: Dataset, val_ratio: float, seed: int) -> Tuple[Subs
     train.py 和 eval.py 都必须走这一个函数，保证两边拿到完全相同的划分——
     否则评估会把训练样本混进"验证集"，指标虚高。
     """
+    if not 0 < val_ratio < 1:
+        raise ValueError("val_ratio 必须位于 (0, 1)")
     n_val = int(len(dataset) * val_ratio)
+    if n_val == 0 or n_val == len(dataset):
+        raise ValueError("划分后训练集和验证集都必须非空")
     g = torch.Generator().manual_seed(seed)
     return tuple(random_split(dataset, [len(dataset) - n_val, n_val], generator=g))

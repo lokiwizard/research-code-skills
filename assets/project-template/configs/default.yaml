@@ -1,50 +1,39 @@
-# 基线配置（single source of truth）。
-# 一切超参都写在这里；想临时改用 `--set key.path=value`，不要在代码里写死数字。
-# 每个字段都标注了含义，新人也能看懂每个数字在控制什么。
-
+# 实验可变项；命令行覆盖后的有效配置保存在实验目录。
 experiment:
-  name: baseline          # 实验名；实验目录会是 <name>_<时间戳>_<配置哈希>
-  seed: 42                # 全局随机种子，复现的前提（固定 Python/NumPy/Torch）
-  output_root: experiments  # 实验产物的根目录，每次运行在其下建一个子目录
-
-# 模型：name 对应 models/ 里的类名，其余字段是它的构造参数
+  name: mlp                 # 实验名，目录追加时间；重名追加数字后缀
+  seed: 42                  # 模型初始化与训练随机种子，不保证跨环境逐位一致
+  output_root: experiments  # 实验产物根目录
 model:
-  name: MLP               # 用哪个模型（models/__init__.py 的 _MODELS 字典里的 key）
-  in_dim: 16              # 输入特征维度（要和数据集的 in_dim 一致）
-  hidden_dim: 64          # 隐藏层宽度，越大容量越强、越易过拟合
-  out_dim: 1              # 输出维度（回归任务为 1）
-  depth: 2               # 隐藏层层数（>=1），越深表达力越强、越难训
-
-# 数据集：name 对应 datasets/ 里的类名
+  name: MLP                 # models 包中的组件名
+  in_dim: 16                # 输入维度，须与 dataset.in_dim 一致
+  hidden_dim: 64            # 隐藏层宽度，正整数
+  out_dim: 1                # 输出维度；本例为单值回归
+  depth: 2                  # 隐藏层层数，至少 1
 dataset:
-  name: SyntheticRegression  # 用哪个数据集
-  n_samples: 2000         # 样本总数
-  in_dim: 16              # 输入维度（需与 model.in_dim 一致）
-  noise: 0.1              # 合成数据的高斯噪声标准差，越大任务越难
-  seed: 0                 # 数据生成种子，与训练种子分开，保证数据本身可复现
-
-# 损失：name 对应 losses/ 里的类名
+  name: SyntheticRegression # 内置合成回归，不需要下载数据
+  n_samples: 2000           # 总样本数，划分后两个集合均须非空
+  in_dim: 16                # 输入维度
+  noise: 0.1                # 高斯噪声标准差，非负
+  seed: 0                   # 数据生成种子，与训练种子独立
 loss:
-  name: MSELoss           # 用哪个损失（换成 CombinedLoss 可引入 alpha 超参做消融）
-
-# 训练超参
+  name: MSELoss             # CombinedLoss 支持 alpha 加权项
 train:
-  epochs: 20              # 训练总轮数
-  batch_size: 64          # 每个 batch 的样本数
+  epochs: 20                # 总轮数，正整数；续训只允许延长总轮数
+  batch_size: 64            # 每批样本数，正整数
   optimizer:
-    name: Adam            # 优化器（trainers/optim.py 的 _OPTIMIZERS：Adam/AdamW/SGD）
-    lr: 1.0e-3            # 学习率；name 之外的字段都直接传给优化器构造函数
-    # weight_decay: 0.0   # 需要时解开注释；SGD 的 momentum 等同理加在这里
+    name: Adam              # Adam、AdamW 或 SGD
+    lr: 1.0e-3              # 学习率，正数
   scheduler:
-    name: none            # 学习率调度：none 不调度；可选 StepLR / CosineAnnealingLR
-    # name: CosineAnnealingLR
-    # T_max: 20           # name 之外的字段直接传给调度器构造函数
-  val_split: 0.2          # 验证集占比（0~1），从训练集里切出来
-  num_workers: 0          # DataLoader 工作进程数；图像等重预处理任务建议调到 4/8
-  pin_memory: false       # cuda 训练时设 true 可加速 host->GPU 拷贝
-  device: auto            # 计算设备：auto 自动选 cuda/cpu，也可写死 cpu / cuda
-  log_interval: 1         # 每多少个 epoch 打印一次日志
-  ckpt_interval: 10       # 每多少个 epoch 存一次"周期 checkpoint"（0 表示不存周期档）
-  ckpt_keep: 3            # 周期档滚动保留最近几个，旧的自动删（0 表示全保留；best/last 不受影响）
-  monitor_metric: mse     # 用哪个指标挑 best.pt（对应 utils/metrics.py 的 key）
-  monitor_mode: min       # 监控指标方向：min=越小越好（loss），max=越大越好（准确率/PSNR）
+    name: none              # none、StepLR 或 CosineAnnealingLR；参数按构造函数填写
+  val_split: 0.2            # 验证集比例，严格位于 (0, 1)
+  split_seed: 123           # 固定划分，多训练种子比较时保持不变
+  num_workers: 0            # 数据加载进程数，0 表示主进程加载
+  pin_memory: false         # CUDA 数据传输可启用锁页内存
+  device: auto              # auto 选择 cuda/cpu，也可指定设备
+  log_interval: 1           # 日志间隔（epoch），正整数；CSV 每轮保存
+  ckpt_interval: 10         # 周期权重间隔；0 不保存周期档，best/last 仍更新
+  ckpt_keep: 3              # 最近 N 个周期权重；0 显式保留全部，best/last 不受影响
+  eval_interval: 10         # 验证结果快照间隔；0 不保存周期档，best/last 仍更新
+  eval_keep: 3              # 最近 N 个验证结果快照；0 显式保留全部
+  monitor_metric: mse       # 挑选 best.pt 的验证指标，对应 METRICS 中的键
+  monitor_mode: min         # min 越小越好，max 越大越好

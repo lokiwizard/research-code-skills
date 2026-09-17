@@ -1,23 +1,11 @@
-"""训练器：把"训练循环"这件事收敛到一个类里，train.py 只管装配。
+"""单设备回归训练器，保存训练状态、验证指标和滚动快照。
 
-职责边界（刻意保持窄）：
-- 接收已经建好的 model / 数据加载器 / loss，自己只负责"循环 + 进度 + 日志 + 存档"。
-- 不关心模型内部结构、不关心数据从哪来——这正是解耦的好处：
-  换模型、换数据、换损失都不需要改这个文件。
-
-支持断点续训：每个 epoch 存一份 last.pt（模型/优化器/调度器/RNG 状态/epoch/best），
-`resume_from` 读回后从下一个 epoch 接着跑。RNG 状态也随档保存并恢复，
-所以"中断后续训"与"一口气跑完"的随机序列一致，结果可逐位对上。
-
-存档策略（避免长训练把磁盘占满，不做全量累积）：
-- last.pt：每 epoch 覆盖，含完整续训状态，续训入口；
-- best.pt：指标刷新时更新，只存模型权重（评估不需要优化器，省一大半体积）；
-- epoch_*.pt：每 ckpt_interval 个 epoch 存一份，滚动保留最近 ckpt_keep 个。
-"""
+恢复从已保存的 epoch 继续；一致性需在目标设备与数据管线上验证。"""
 
 from __future__ import annotations
 
 import time
+import math
 from pathlib import Path
 from typing import Any, Dict
 
@@ -27,6 +15,7 @@ from tqdm import tqdm
 
 from trainers.optim import build_optimizer, build_scheduler
 from utils.checkpoint import BestTracker, load_checkpoint, prune_checkpoints, save_checkpoint
+from utils.artifacts import save_evaluation
 from utils.logger import CSVLogger
 from utils.metrics import METRICS
 from utils.seed import get_rng_state, set_rng_state
@@ -65,6 +54,10 @@ class Trainer:
         self.log_interval = int(tcfg.get("log_interval", 1))
         self.ckpt_interval = int(tcfg.get("ckpt_interval", 0))
         self.ckpt_keep = int(tcfg.get("ckpt_keep", 3))
+        self.eval_interval = int(tcfg.get("eval_interval", 10))
+        self.eval_keep = int(tcfg.get("eval_keep", 3))
+        if min(self.ckpt_keep, self.eval_keep, self.ckpt_interval, self.eval_interval) < 0:
+            raise ValueError("产物保留数量和快照间隔不能为负数")
         self.metric_name = tcfg.get("monitor_metric", "mse")
         self.monitor_mode = tcfg.get("monitor_mode", "min")
 
@@ -77,12 +70,12 @@ class Trainer:
 
     # ---- 断点续训：从 last.pt 恢复模型/优化器/调度器/RNG/进度 ----
     def resume_from(self, ckpt_path: str | Path) -> None:
-        state = load_checkpoint(ckpt_path, map_location=str(self.device))
+        state = load_checkpoint(ckpt_path, map_location="cpu")
         self.model.load_state_dict(state["model"])
         self.optimizer.load_state_dict(state["optimizer"])
         if self.scheduler is not None and state.get("scheduler") is not None:
             self.scheduler.load_state_dict(state["scheduler"])
-        set_rng_state(state.get("rng"))  # 恢复随机序列，续训 == 一口气跑完
+        set_rng_state(state.get("rng"))
         self.best.best = state.get("best")
         self.best_epoch = state.get("best_epoch")
         self.start_epoch = int(state["epoch"]) + 1  # 从下一个 epoch 接着跑
@@ -98,8 +91,15 @@ class Trainer:
             x, y = x.to(self.device), y.to(self.device)
             self.optimizer.zero_grad()
             pred = self.model(x)
+            if pred.shape != y.shape:
+                raise ValueError(f"回归预测与目标形状不一致：{pred.shape} vs {y.shape}")
             loss = self.loss_fn(pred, y)
+            if loss.ndim != 0 or not torch.isfinite(loss).item():
+                raise ValueError("训练损失必须是有限标量")
             loss.backward()
+            if any(p.grad is not None and not torch.isfinite(p.grad).all().item()
+                   for p in self.model.parameters()):
+                raise ValueError("梯度出现 NaN 或 Inf，停止更新参数")
             self.optimizer.step()
             total += loss.item() * x.size(0)
             n += x.size(0)
@@ -114,6 +114,8 @@ class Trainer:
         for x, y in self.val_loader:
             x, y = x.to(self.device), y.to(self.device)
             pred = self.model(x)
+            if pred.shape != y.shape:
+                raise ValueError(f"回归预测与目标形状不一致：{pred.shape} vs {y.shape}")
             loss_sum += self.loss_fn(pred, y).item() * x.size(0)
             n += x.size(0)
             preds.append(pred.cpu())
@@ -136,6 +138,8 @@ class Trainer:
             row["train_loss"] = self._train_one_epoch(epoch)
             val_stats = self._validate()
             row.update(val_stats)
+            if not all(math.isfinite(v) for v in row.values()):
+                raise ValueError("训练或验证指标出现 NaN/Inf，保留上一轮存档")
 
             # 先更新 best/调度器再存档，last.pt 里的状态才是本 epoch 结束后的最新值
             best_improved = self.best.update(val_stats[monitor_key])
@@ -152,6 +156,13 @@ class Trainer:
             if best_improved:
                 save_checkpoint(self._state(epoch, for_resume=False),
                                 self.exp_dir / "checkpoints", "best.pt")
+
+            save_evaluation(
+                {"epoch": epoch, "split": "val", **val_stats},
+                self.exp_dir / "evaluations", best_improved,
+                periodic=bool(self.eval_interval and epoch % self.eval_interval == 0),
+                keep=self.eval_keep,
+            )
 
             # 周期性存档 + 滚动清理：只保留最近 ckpt_keep 个周期档，
             # 长训练也不会无限累积占满磁盘（best/last 不受影响）
@@ -186,7 +197,7 @@ class Trainer:
         """组装 checkpoint 内容。
 
         for_resume=True（last.pt / 周期档）额外带上优化器/调度器/RNG 状态，
-        保证续训无缝；for_resume=False（best.pt）只存权重，体积约缩到 1/3。
+        for_resume=False（best.pt）省略优化器等恢复状态，保留权重与元数据。
         """
         state = {
             "epoch": epoch,

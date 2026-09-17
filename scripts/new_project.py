@@ -1,21 +1,9 @@
-"""科研项目脚手架生成器：把 assets/project-template/ 复制成一个新项目。
-
-用法：
-    python new_project.py my-experiment                 # 在当前目录生成 my-experiment/
-    python new_project.py my-exp --dest ~/research       # 指定父目录
-    python new_project.py my-exp --git --uv              # 顺便 git init 并 uv sync
-
-做的事很简单（刻意保持透明）：
-1. 递归复制模板目录到 <dest>/<name>/；
-2. 把文件里的占位符 {{PROJECT_NAME}} 替换成项目名；
-3. 可选：初始化 git、用 uv 建环境。
-
-只用标准库，复制后的项目是完全独立、可直接运行的真实代码。
-"""
+"""复制科研项目模板并替换项目名。可选初始化 Git 或执行 uv sync。"""
 
 from __future__ import annotations
 
 import argparse
+import re
 import shutil
 import subprocess
 import sys
@@ -30,7 +18,7 @@ IGNORE = shutil.ignore_patterns("__pycache__", "*.pyc", ".venv", "uv.lock",
                                 "experiments", "results")
 
 # 需要做占位符替换的文本文件
-SUBSTITUTE_FILES = ["pyproject.toml", "README.md"]
+SUBSTITUTE_FILES = ["pyproject.toml", "README.md", "AGENTS.md"]
 
 
 def render_placeholders(project_dir: Path, project_name: str) -> None:
@@ -59,10 +47,17 @@ def main() -> None:
     parser.add_argument("--force", action="store_true", help="目标已存在时覆盖")
     args = parser.parse_args()
 
+    if not re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?", args.name):
+        parser.error("项目名需以英文字母或数字起止，中间仅允许字母、数字、点、下划线和连字符")
     if not TEMPLATE_DIR.exists():
         sys.exit(f"找不到模板目录：{TEMPLATE_DIR}")
 
     project_dir = Path(args.dest).expanduser().resolve() / args.name
+    if project_dir.is_symlink():
+        sys.exit(f"目标不能是符号链接：{project_dir}")
+    if (project_dir == TEMPLATE_DIR or project_dir in TEMPLATE_DIR.parents
+            or TEMPLATE_DIR in project_dir.parents):
+        sys.exit("目标目录不能覆盖模板或位于模板内部")
     if project_dir.exists():
         if not args.force:
             sys.exit(f"目标已存在：{project_dir}（加 --force 覆盖）")
@@ -74,17 +69,17 @@ def main() -> None:
     print(f"已生成项目：{project_dir}")
 
     if args.git:
-        subprocess.run(["git", "init", "-q"], cwd=project_dir, check=False)
+        subprocess.run(["git", "init", "-q"], cwd=project_dir, check=True)
         print("  已 git init")
     if args.uv:
         print("  正在 uv sync ……")
-        subprocess.run(["uv", "sync"], cwd=project_dir, check=False)
+        subprocess.run(["uv", "sync"], cwd=project_dir, check=True)
 
-    print("\n下一步：")
+    print("\n运行命令：")
     print(f"  cd {project_dir}")
-    print("  uv sync  # 若未加 --uv" if not args.uv else "  uv run python train.py --config configs/default.yaml")
     if not args.uv:
-        print("  uv run python train.py --config configs/default.yaml")
+        print("  uv sync")
+    print("  uv run python train.py --config configs/default.yaml")
 
 
 if __name__ == "__main__":

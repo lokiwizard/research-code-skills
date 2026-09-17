@@ -1,69 +1,43 @@
-# 项目布局与复现约定
+# 项目布局与复现
 
-脚手架（`assets/project-template/`）的设计依据。用 `scripts/new_project.py` 生成后，
-按本文调整即可。
+模板提供单设备 MLP 合成回归示例。新项目可从模板开始；已有项目按原接口修改。
 
-## 目录职责
+| 位置 | 职责 |
+|---|---|
+| `train.py` / `eval.py` | 配置、组件装配、训练或评估入口 |
+| `models/` / `datasets/` / `losses/` | 模型、数据与损失，显式字典和 `build_*` 函数 |
+| `trainers/` | 训练、验证、优化器、调度器 |
+| `utils/` | 种子、配置、日志、checkpoint、指标 |
+| `configs/` | 基线与实验配置 |
+| `scripts/` | 配置生成、结果分析 |
+| `experiments/` / `results/` | 实验产物、分析输出 |
+| `AGENTS.md` / `DEVLOG.md` | 项目约定、方法与验证记录 |
 
-| 目录/文件 | 职责 | 改动频率 |
-|---|---|---|
-| `train.py` / `eval.py` | **入口**，只做装配（读配置 → 建组件 → 跑），保持薄 | 低 |
-| `configs/default.yaml` | 超参的唯一来源 | 每次实验 |
-| `configs/ablations/` | `make_ablation.py` 生成的消融配置（自动、gitignore） | 自动 |
-| `models/` | 模型 `nn.Module`；`build_model(cfg)` 按名字实例化 | 高 |
-| `datasets/` | `torch.utils.data.Dataset`；`build_dataset(cfg)` | 中 |
-| `losses/` | 损失 `nn.Module`；`build_loss(cfg)` | 中 |
-| `trainers/` | 训练循环（前向/反向/日志/存档），与具体模型无关 | 低 |
-| `utils/` | 配置、种子、日志、checkpoint、指标 | 低 |
-| `scripts/` | 辅助工具：`make_ablation.py`、`analyze.py` | 低 |
-| `experiments/` | 每次训练一个子目录（产物，gitignore） | 自动 |
-| `results/` | 分析图表输出（gitignore） | 自动 |
+新增组件后导入并加入对应字典。只在输入输出兼容时可直接替换；多输出模型、特殊损失或训练策略需要调整调用方。
 
-## 为什么这样分
+## 模板行为
 
-- **入口薄、逻辑沉**：`train.py` 不写训练细节，只把零件拼起来。读代码的人先看入口就懂全貌。
-- **三类组件平行**：模型、数据、损失是研究中最常被替换的三样，各自独立成包，互不 import 内部。
-- **训练循环与模型解耦**：`Trainer` 只接收"已经建好的"模型/数据/损失，所以换模型不动 `trainers/`。
+- 实验目录使用 `<name>_<日期_时间>`，重名加数字后缀；保存有效配置、日志、CSV、指标摘要及 checkpoint。
+- `last.pt` 保存模型、优化器、调度器和随机源状态；`best.pt` 保存验证选出的模型及元数据；周期档按 `ckpt_keep` 保留。
+- 从最近已保存的 epoch 恢复。默认示例不覆盖 batch 内恢复、分布式采样器、AMP、EMA 或自定义数据管线的状态。
+- 续训只允许延长总轮数，其他训练条件变化应新开实验。延长轮数不会自动改调度器周期；比较连续与恢复训练时必须使用相同调度策略。
+- 训练与评估共用 `split_train_val`。新配置用 `train.split_seed` 固定划分；旧配置缺少该字段时沿用 `experiment.seed`。
+- 默认 `eval.py` 评估验证集，不是独立测试集。其他 split/checkpoint 的评估另存文件，不能覆盖默认验证结果。
 
-## 组件如何按名字装配（不用注册表）
+## 适配真实任务
 
-每个包的 `__init__.py` 里放一个**显式字典 + build 函数**：
+替换数据集和模型，明确数据版本、预处理、划分与指标聚合方法，再调整训练接口。正式实验补充代码版本及未提交差异、环境与设备记录、固定划分清单、独立测试入口和统计分析。
 
-```python
-# models/__init__.py
-from .mlp import MLP
-from .your_model import YourModel        # 1) 新模型 import 进来
+模板验证阶段将预测收集到 CPU 后整体计算指标，适用于小数据；大数据应改为正确的流式统计。固定种子和 RNG 保存不能单独保证逐位复现，支持范围以对照测试为准。
 
-_MODELS = {"MLP": MLP, "YourModel": YourModel}   # 2) 加一行
+## 训练产物滚动保留
 
-def build_model(cfg):
-    cfg = dict(cfg); name = cfg.pop("name")
-    return _MODELS[name](**cfg)            # name 之外的字段直接当构造参数
-```
+权重位于 `checkpoints/`：`last.pt`、`best.pt` 及最近 `train.ckpt_keep` 个周期档。
+验证结果位于 `evaluations/`：`last.json`、`best.json` 及最近 `train.eval_keep` 个周期档；周期由 `train.eval_interval` 控制。
+两类默认各保留 3 个周期档，另保留 best/last；keep=0 显式保留全部，interval=0 不生成周期档。
 
-配置里 `model: {name: YourModel, ...构造参数}` 即可。这样做的好处：**没有隐式魔法**，
-"有哪些可选组件"和"怎么加新组件"都在这一处看得见，比注册表/装饰器更适合科研代码。
+新档写入成功后才清理旧档。CSV 标量历史不删除；正式测试结果单独归档。模板未输出逐样本预测或重建图，真实任务增加这些大文件时需沿用同样的保留规则。
 
-## 实验命名与可复现
+训练入口校验顶层、experiment/train 字段及常用范围；组件构造参数由对应实现检查。恢复前对照 checkpoint 内配置，只允许延长总轮数。NaN/Inf 损失、梯度或验证指标会停止训练，不更新最佳权重。跨文件中断一致性仍需检查，模板未实现事务式恢复。
 
-- 实验目录名 = `<experiment.name>_<时间戳>_<配置哈希>`：分别回答"哪个实验/何时跑/什么配置"。
-- 每次运行落盘：`config.yaml`（当时生效的完整配置）、`train.log`、`metrics.csv`、
-  `metrics.json`、`checkpoints/`。
-- checkpoint 策略（控制磁盘占用，不做全量累积）：`last.pt` 每 epoch 覆盖（含优化器/
-  调度器/RNG 状态，续训入口）；`best.pt` 指标刷新时更新（只存权重，评估用）；
-  `epoch_*.pt` 每 `ckpt_interval` 存一份、滚动保留最近 `ckpt_keep` 个（旧档自动删）。
-- 续训是严格复现：RNG 状态随 checkpoint 保存/恢复，"中断后 `--resume`"与"一口气跑完"
-  的随机序列一致；续训时的 `--set` 覆盖会写回实验目录的 `config.yaml`（配置始终等于实际生效值）。
-- train/val 划分收敛在 `datasets.split_train_val`（固定种子），`train.py` 与 `eval.py`
-  共用，评估默认在验证集上（`eval.py --split val`），不会把训练样本混进指标。
-- 复现三件套：**固定种子**（`utils/seed.py` 覆盖 Python/NumPy/Torch）、**保存配置**、**锁依赖**（`uv.lock`）。
-- 数据划分也用独立种子，保证 train/val 切分可复现。
-
-## 改造为真实任务的步骤
-
-1. 把 `datasets/synthetic.py` 换成你的数据集（实现 `__len__`/`__getitem__`），更新 `_DATASETS`。
-2. 把 `models/mlp.py` 换成你的模型，更新 `_MODELS`。
-3. 在 `utils/metrics.py` 加你任务的指标（如 PSNR/SSIM/Accuracy），签名保持 `f(pred, target)->float`。
-4. 优化器/学习率调度已可配置（`train.optimizer` / `train.scheduler`，选项在
-   `trainers/optim.py` 的字典里加）；梯度裁剪、AMP 等再按需改 `trainers/trainer.py`。
-5. 更新 `configs/default.yaml` 的各 `name` 与超参。
+保留数量不是磁盘容量上限。运行前按权重与预测文件大小估算占用，并预留原子替换所需的临时空间；图片、中间特征等需单独限制样本数或保存频率。

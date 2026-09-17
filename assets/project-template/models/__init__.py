@@ -4,7 +4,7 @@
 1. 在本目录新建 `your_model.py`，写好 `nn.Module`；
 2. 在下面 import 进来，并往 `_MODELS` 字典加一行。
 
-这样训练代码只调用 `build_model(cfg)`，永远不用改。
+输入输出接口兼容时，训练入口无需调整。
 """
 
 from __future__ import annotations

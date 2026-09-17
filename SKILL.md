@@ -1,165 +1,86 @@
 ---
 name: research-code-skills
-description: 科研代码撰写工具：生成模块化、可复现、可扩展的 PyTorch 研究项目脚手架，用 uv 管理环境，用 yaml 管理实验配置与消融，读取日志/CSV/JSON 自动产出表格/曲线/消融图与论文风格 caption，并把论文方法/公式/伪代码拆解成 PyTorch 模块、训练流程、损失与配置。Use when the user wants to start or organize a research/ML codebase, scaffold a deep-learning project (models/ datasets/ losses/ trainers/ configs/ scripts/ utils/ experiments/ results/), set up train.py/eval.py/config.yaml/logging/checkpoints/seed/experiment-naming, manage hyperparameters or ablations via yaml, analyze and visualize experiment results (curves, ablation plots, PSNR-vs-SNR, 3D ablation surfaces, comparison figures) with paper-ready captions, or turn a paper method / formula / pseudocode / idea into a clean PyTorch implementation. Emphasis on simple, readable, well-commented, decoupled code.
+description: 编写、复现和整理深度学习及计算机领域的科研代码，涵盖论文方法实现、PyTorch 项目脚手架、实验设计、配置与消融、结果分析及复现交付。适用于新建研究项目或改进已有实验流程；普通业务开发不使用此技能。
 ---
 
-# Research Code Skills（科研代码撰写）
+# 科研代码
 
-帮助研究者写出**模块化、可复现、可扩展**的实验代码。科研代码最怕后期混乱，
-所以本技能默认强制：配置与代码分离、随机性可控、组件解耦、产物可追溯。
+按用户要求完成实现、验证、实验或交付。先检查已有代码、项目约定和可用环境；已有项目沿用其结构与工具，不为套模板重构。
 
-## 何时用
+## 工作流程
 
-- 起一个新的深度学习/科研项目，需要标准目录与训练/评估骨架。
-- 把已有的散乱脚本规整成模块化结构。
-- 管理超参与消融实验（生成一组配置、逐一变量或网格扫描）。
-- 实验跑完后，把日志/CSV/JSON 变成论文能用的表格、曲线、消融图与 caption。
-- 把论文的方法描述/公式/伪代码/你的想法，落成 PyTorch 模块、损失、训练流程与配置。
+按任务范围执行相关步骤。修复局部问题无需重走整个流程；完整项目不能以“训练能跑”作为完成标准。
 
-## 动手前先对齐（重要）
+1. 明确研究问题、待检验假设、基线、主要指标与验收条件。实现论文方法时区分原文、官方实现和自行假设，记录出处及差异。只有影响方法含义或实验有效性的缺项才询问用户，其余按合理假设推进并记录。
+2. 定义输入输出、张量形状、单位、预处理、损失与梯度路径。提前确定数据划分、模型选择规则和实验预算，避免看到结果后改变评价标准。
+3. 实现最小端到端流程。检查前向、反向、梯度与指标；用小样本过拟合或任务对应的解析解、参考实现和任务不变量等验证正确性。合成数据跑通仅说明接口可运行。
+4. 在同一评估协议下跑基线和方法，再做消融。完整任务继续完成约定的实验；资源不足时交付已验证代码、可执行命令和未完成清单，不把未运行项写成完成。
+5. 根据原始记录分析结果，检查异常、失败运行和随机波动。配置及选模规则确定后才进行最终测试，测试结果不参与调参。
+6. 保存复现所需的代码版本、环境、配置、数据标识、权重与分析脚本。核验从原始结果重建表图的命令，交付时列出实际测试、结果位置和限制。
 
-**在写任何实现代码前，先和用户确认算法的流程与 idea**，达成一致再编码。至少确认清楚：
+设计或审查实验时读 [实验设计与验收](references/experiment-protocol.md)。其余资料按需读取：
 
-- 要解决的问题与核心想法（idea）是什么；
-- 端到端的数据流与各阶段张量形状；
-- 关键模块的划分、目标函数（损失）由哪几项构成、哪些量需要做成可配置/可消融的超参；
-- 训练流程与评估指标。
+| 任务 | 资料 |
+|---|---|
+| 新建项目、适配训练与恢复逻辑 | [项目布局](references/scaffold-layout.md) |
+| 论文、公式或伪代码实现 | [论文到代码](references/paper-to-code.md) |
+| 配置、消融或超参搜索 | [配置与消融](references/config-and-ablation.md) |
+| 表格、曲线、统计与图注 | [结果分析](references/result-analysis.md) |
+| 查看脚手架命令示例 | [使用示例](examples/walkthrough.md) |
 
-把上述要点用简短的流程描述或伪代码先讲清楚、请用户确认（或纠正）后，再开始落代码。
-脚手架/工具类、用户已明确给出完整方案的情况可直接执行；但凡涉及"论文方法→代码"或
-新算法实现，**先对齐，后编码**，避免反复返工。
+## 实现约定
 
-## 代码留痕：维护 DEVLOG.md（重要）
+- 实验中需要改变的量放入配置，说明含义、单位和合法范围；数学常数与内部实现常量不必配置化。命令行覆盖后的有效配置随实验保存。
+- 明确组件接口后再拆分代码。简单运算用函数或现成算子；有参数或状态时再用类。更换返回结构、训练目标或优化方式时允许调整训练循环。
+- 新项目默认使用显式字典和 `build_*` 函数装配。已有注册机制可保留，不为形式一致迁移。
+- 配置校验应覆盖未知参数、取值范围及跨组件维度。新增组件参数要同步更新说明，避免拼错参数后静默使用默认值。
+- 保留能检验方法或防止回归的测试。临时调试产物放临时目录；只清理本任务可重新生成的临时文件，保留原始实验记录和失败证据。
 
-每个项目都有一份 `DEVLOG.md`（脚手架已自带模板），它是代码的"留痕"文件。要求：
+## 环境与实验记录
 
-- **对齐之后**，把确认好的核心 idea、算法流程（含数据流/shape/模块/损失）、代码计划
-  写进 DEVLOG 的第 1–3 节，作为实现的依据。
-- **每次写或改代码后**，在第 4 节「变更记录」追加一行：`日期 | 改了什么 | 为什么 | 涉及文件`。
-  "为什么"最重要——它记录了设计决策，便于复盘、交接和论文写作时回溯。
-- 改动较大时同步更新第 2–3 节（算法流程/计划），保持 DEVLOG 与代码一致。
+新项目默认 uv；已有项目沿用其环境。首次解析依赖后提交 `uv.lock`，复现时使用 `uv sync --locked`。未获下载授权时只检查本地环境，避免 `uv run` 隐式同步；可用已有 `.venv` 或 `uv run --no-sync`。
 
-无论是脚手架生成、落实论文方法，还是后续修改，都不要"改完就走"——**改完必记一笔**。
+优先使用已有依赖。需要新增包、数据或权重时检查来源、版本、用途及可获知的大小；当前授权已覆盖的操作直接执行，超出授权再确认，不猜测大小或反复询问。
 
-## 五条不可破坏的原则
+每次新实验单独建目录，名称使用实验名和时间，重名加后缀。保存有效配置、日志、指标及 checkpoint；正式实验另保存代码提交及未提交差异、依赖锁、设备信息、数据版本与划分。哈希可用于校验和追溯。
 
-1. **配置即唯一事实来源**：超参全部进 yaml，代码里不写死数字。改参用 `--set key=value` 或新配置文件，不改代码。
-2. **可复现优先**：固定随机种子；每次运行保存当时的完整配置与配置哈希；实验命名带时间戳，绝不互相覆盖；锁依赖（`uv.lock`）。
-3. **解耦**：模型/数据/损失/训练循环各管一摊。换其中任何一个，其余代码一行不改。
-4. **简约可读**：小函数、单一职责、命名达意；注释解释"为什么"而非复述代码；不引入不必要的抽象与框架。
-5. **产物可追溯**：每次实验自成一个目录，内含配置、日志、指标、checkpoint，"看到结果就能找回是怎么跑出来的"。
+固定种子不保证跨设备、跨版本或任意数据管线逐位一致。异常运行先保留错误与最后有效存档，不靠跳过数据或无上限重试继续。改变实验条件后新建运行，失败处理见实验设计与验收。
 
-> 关于"解耦"的实现方式：用**显式的 `build_model/build_dataset/build_loss` 函数 + 一个字典**
-> 按名字实例化组件即可，不要上注册表/装饰器那类隐式机制——对科研代码反而增加理解成本。
-> 新增一个组件 = 写一个文件 + 在字典里加一行，一眼能看懂在哪改。
+断点恢复需检查模型、优化器、调度器、随机源，以及任务使用的采样器、AMP、EMA 等状态；用中断前后的对照验证支持范围。
 
-## 能力 1 · 项目脚手架生成
+用 `DEVLOG.md` 或已有记录文件维护方法假设、实现差异、验证结论。每个有意义的改动记一次原因和证据，无需逐次编辑记流水账；未得到用户确认的内容不得写成“已确认”。
 
-用 `scripts/new_project.py` 从 `assets/project-template/` 生成一个**完整可运行**的项目：
+## 磁盘保留策略
 
-```bash
-python scripts/new_project.py <项目名> --dest <父目录> [--git] [--uv]
-```
+训练期间的权重和体积较大的验证/测试明细滚动更新：保留最佳版本、最新恢复点及最近 N 个周期快照，N 可配置，默认 3。新文件写入成功后再清理旧快照；最佳权重只由预先指定的验证指标选择，不用测试集选模。
 
-生成的结构（与用户预期一致）：
+配置、标量指标、汇总日志与失败原因保留完整记录；中间预测、重建图等大文件采用相同保留策略。正式测试结果与论文使用的权重/样本单独归档，不参与训练期清理。清理只针对当前实验拥有的文件，不能按通配符删除其他实验。
 
-```
-<项目名>/
-├── train.py  eval.py            # 入口（薄，只负责装配）
-├── DEVLOG.md                    # 开发日志：算法流程/代码计划/改动留痕
-├── configs/default.yaml         # 基线配置 + ablations/（自动生成的消融配置）
-├── models/ datasets/ losses/    # 三类可替换组件，各有 build_* 函数
-├── trainers/                    # 训练循环
-├── utils/                       # 配置/种子/日志/checkpoint/指标
-├── scripts/make_ablation.py analyze.py
-├── experiments/  results/       # 训练产物 / 分析图表（gitignore）
-└── pyproject.toml requirements.txt README.md .gitignore
-```
+模板分别用 `train.ckpt_keep`、`train.eval_keep` 控制权重和验证 JSON 周期快照，`best`/`last` 独立更新；0 表示显式不限制保留数量。真实任务新增预测、图片或中间特征时，需实现对应清理并验证保留上限。
 
-模板自带：CSV+文本日志、best/last/周期 checkpoint（周期档**滚动保留**最近
-`ckpt_keep` 个、best 只存权重，不做全量累积，磁盘可控）、**断点续训**（`--resume`，
-RNG 状态随档保存，续训与一口气跑完结果一致）、优化器/学习率调度器从配置构建、
-**tqdm 进度条**、种子固定、`<name>_<时间戳>_<配置哈希>` 命名规则、合成数据让框架
-**开箱即跑**。生成后即可：`uv run python train.py --config configs/default.yaml`；
-中断后 `uv run python train.py --resume experiments/<某次实验>` 续训；评估
-`eval.py` 默认在与训练一致的验证集划分上算指标。
+## 使用脚手架
 
-布局、命名与复现约定的细节见 `references/scaffold-layout.md`。
-**优先用 `new_project.py` 生成再按需改**，不要手敲整套目录。
-
-## 能力 2 · 用 uv 管理环境
-
-默认 uv（Rust 实现，快）：
+在技能目录运行，目标目录应为新目录：
 
 ```bash
-uv sync                          # 按 pyproject.toml / uv.lock 精确还原
-uv run python train.py ...        # 在锁定环境里运行
-uv add <pkg>                      # 增依赖（自动更新 lock）
-uv python pin 3.11                # 锁 Python 版本
+python scripts/new_project.py my-experiment --dest <父目录> [--git] [--uv]
 ```
 
-模板的 `pyproject.toml` 已配好依赖与 ruff。务必提交 `uv.lock`。给不用 uv 的环境留了
-`requirements.txt` 兜底。
-
-## 能力 3 · 实验配置与消融管理
-
-- 所有超参在 `configs/default.yaml`；临时改用 `--set`，固定改法新建配置文件。
-- 用 `scripts/make_ablation.py` 从基线批量生成配置：
-  - `--mode oat`（逐一变量）= 标准消融，每次只改一个超参、其余保持基线，干净归因；
-  - `--mode grid`（网格）= 超参搜索，取值的笛卡尔积。
+项目内运行：
 
 ```bash
-python scripts/make_ablation.py --base configs/default.yaml --mode oat \
+uv sync
+uv run python train.py --config configs/default.yaml
+uv run python eval.py --exp-dir experiments/<实验目录>
+uv run python scripts/make_ablation.py --base configs/default.yaml --mode oat \
     --set loss.name=CombinedLoss --grid loss.alpha=0.0,0.1,0.5,1.0
+uv run python scripts/analyze.py summary --exp-root experiments
 ```
 
-生成的配置文件名编码了被改的超参，便于 `analyze.py` 按超参聚合画图。
-详见 `references/config-and-ablation.md`。
+模板是单设备合成回归示例，提供训练、验证、checkpoint、续训及基础作图。它没有独立测试集、分布式训练或多种子统计；真实任务按实验协议补充，不能将示例验证分数当成论文最终结果。
 
-## 能力 4 · 结果分析与可视化
+## 文档与回复
 
-用 `scripts/analyze.py` 读实验目录（config.yaml / metrics.csv / metrics.json / eval.json），
-产出三类论文常用图表，每张图配一段**论文风格 caption**（数字真实算出，文字给初稿）：
+直接写行为、依据和限制，删掉口号、重复总结和无证据的判断。避免“闭环”“赋能”“一行不改”“完全可复现”等泛化表述。保留术语、参数名、命令和必要条件。
 
-```bash
-python scripts/analyze.py summary --exp-root experiments              # 跨实验最终指标汇总表
-python scripts/analyze.py curves  --exp-root experiments --metric val_loss   # 曲线 vs epoch
-python scripts/analyze.py sweep   --exp-root experiments --x loss.alpha --y best_val_mse  # 消融曲线
-python scripts/analyze.py sweep   --exp-root experiments --x model.depth --x2 model.hidden_dim --y best_val_mse  # 3D 消融曲面
-```
-
-`sweep` 正是"PSNR vs SNR""LPIPS vs token budget"这类图；给两个超参（如 α 与 L）即出
-3D 消融曲面。它**不依赖脚手架**——指向任何含上述文件的目录都能用。重建图像/样本对比类
-可视化、配色与排版规范见 `references/result-analysis.md`。
-
-## 能力 5 · 论文方法到代码实现
-
-输入论文方法描述、公式、伪代码或想法，按固定流程拆解，落进脚手架对应的槽位：
-
-1. **数据流**：输入张量形状 → 各阶段形状 → 输出（先把 shape 标清楚）。
-2. **模块分解**：每个公式/子结构对应一个 `nn.Module`，放进 `models/`。
-3. **损失**：目标函数逐项拆成可加权的 loss，放进 `losses/`，权重作为配置项（天然可消融）。
-4. **训练流程**：前向/反向/优化器/调度，落进 `trainers/`。
-5. **配置项**：所有超参（维度、层数、权重、学习率…）进 `configs/`。
-
-把公式符号与代码变量名对齐、为每个模块写"它做什么/为什么在/去掉会怎样"。
-完整的拆解模板与公式→模块映射示例见 `references/paper-to-code.md`。
-
-## 代码风格（贯穿全部能力）
-
-- 简约：能用小函数就别上类层级；不为"将来可能"提前抽象（YAGNI）。
-- 可读：命名自解释；与周围代码同密度地写注释；注释讲"为什么"。
-- 解耦：组件间只通过明确的输入输出与配置交互，不互相 import 内部细节。
-- 注释全面但不啰嗦：复杂逻辑、shape 约定、复现相关的点（种子/划分）一定要注。
-- 默认中文注释（贴合使用者）；标识符用英文。
-
-## 典型流程
-
-起项目 → `new_project.py` 生成并 `uv sync` → 把方法落进 models/losses（能力5）→
-跑基线 `train.py` → `make_ablation.py` 出一组消融 → 逐个训练 → `analyze.py` 出表格/曲线/caption。
-端到端示例见 `examples/walkthrough.md`。
-
-## 衔接
-
-需要时可配合其他技能：文献/笔记（paper-notes-skills）、论文写作、图表规划与绘制、
-引用管理等。本技能聚焦"把研究跑起来并产出可分析、可写进论文的结果"。
+README 说明任务、环境、数据准备、训练、评估及复现命令；AGENTS.md 只保留当前项目需要的约定，可随方法调整。图注写清指标、数据划分、样本或重复次数及误差条含义，解释与实测事实分开。不编造显著性、机理或未运行的结果。

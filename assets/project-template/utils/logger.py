@@ -1,15 +1,15 @@
-"""实验命名 + 日志记录：让每次跑都留下可追溯的痕迹。
+"""实验目录与日志：让每次跑都留下可追溯的痕迹。
 
 一个实验目录长这样::
 
-    experiments/baseline_20260624-153000_a1b2c3/
+    experiments/mlp_2024-01-15_14-30/
     ├── config.yaml      # 当时生效的完整配置
     ├── train.log        # 控制台同款文本日志
     ├── metrics.csv      # 每个 epoch 一行，给画图/分析用
     └── checkpoints/     # 模型权重
 
-实验名规则：<实验名>_<时间戳>_<配置哈希>，三段分别回答
-"这是哪个实验 / 什么时候跑的 / 用的什么配置"，天然避免覆盖和混淆。
+目录命名 = 实验名 + 人类可读时间，一眼能看出是什么、什么时候跑的。
+同一分钟内重名会自动加 -2、-3 后缀，不会互相覆盖。
 """
 
 from __future__ import annotations
@@ -21,10 +21,23 @@ from pathlib import Path
 from typing import Any, Dict
 
 
-def make_experiment_name(name: str, cfg_hash: str) -> str:
-    """拼出唯一实验名：<name>_<时间戳>_<配置哈希>。"""
-    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    return f"{name}_{stamp}_{cfg_hash}"
+def make_experiment_dir(root: str | Path, name: str) -> Path:
+    """新建实验目录：<root>/<name>_<YYYY-MM-DD_HH-MM>，返回目录路径。
+
+    同名同分钟重复创建时追加 -2、-3 后缀，避免覆盖。
+    """
+    if not name or Path(name).name != name or name in {".", ".."}:
+        raise ValueError("实验名必须是单个目录名")
+    stamp = datetime.now().strftime("%Y-%m-%d_%H-%M")
+    for i in range(1, 100):
+        dirname = f"{name}_{stamp}" if i == 1 else f"{name}_{stamp}-{i}"
+        exp_dir = Path(root) / dirname
+        try:
+            exp_dir.mkdir(parents=True)
+        except FileExistsError:
+            continue
+        return exp_dir
+    raise RuntimeError(f"实验目录创建失败：{root}/{name}_{stamp} 下重名太多")
 
 
 def setup_logger(log_file: str | Path, name: str = "exp") -> logging.Logger:

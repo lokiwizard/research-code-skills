@@ -1,86 +1,50 @@
 # {{PROJECT_NAME}}
 
-科研实验项目，由 `research-code-skills` 脚手架生成。默认强制 **模块化、可复现、可扩展**。
+单设备回归示例：MLP 拟合合成数据 `y = Wx + n`，默认损失为 MSE。替换数据、模型和指标后可用于真实任务，接口变化时需调整训练循环。
 
-## 目录结构
-
-```
-{{PROJECT_NAME}}/
-├── train.py              # 训练入口（只负责装配，薄）
-├── eval.py               # 评估入口（从实验目录加载 best.pt）
-├── DEVLOG.md             # 开发日志：算法流程/代码计划/每次改动留痕
-├── configs/
-│   ├── default.yaml      # 基线配置：所有超参的唯一来源
-│   └── ablations/        # make_ablation.py 生成的消融配置（自动）
-├── models/               # 模型（build_model 按名字实例化）
-├── datasets/             # 数据集（build_dataset）
-├── losses/               # 损失（build_loss）
-├── trainers/             # 训练循环
-├── utils/                # 配置/种子/日志/checkpoint/指标
-├── scripts/
-│   ├── make_ablation.py  # 批量生成消融/超参配置
-│   └── analyze.py        # 读结果 → 表格/曲线/消融图 + 论文 caption
-├── experiments/          # 每次训练的输出（自动，gitignore）
-└── results/              # 分析图表输出（自动，gitignore）
-```
-
-## 环境（uv）
+## 环境与训练
 
 ```bash
-uv sync                       # 按 pyproject.toml/uv.lock 还原环境
+uv sync
 uv run python train.py --config configs/default.yaml
+uv run python train.py --config configs/default.yaml --set train.optimizer.lr=5e-4
 ```
 
-> 不用 uv 时：`pip install -r requirements.txt`，再去掉命令里的 `uv run`。
+首次安装后提交 `uv.lock`；复现时用 `uv sync --locked`。不用 uv 时可安装 `requirements.txt`，但它不是精确版本锁。
 
-## 快速开始
+产物位于 `experiments/<实验名>_<日期_时间>/`：有效配置、日志、CSV、指标摘要和 checkpoint。正式实验另需记录代码版本、环境设备、数据版本及划分。
+
+## 恢复与评估
 
 ```bash
-# 1) 训练基线（开箱即跑，用合成数据，无需下载）
-uv run python train.py --config configs/default.yaml
+uv run python train.py --resume experiments/<实验目录>
+uv run python train.py --resume experiments/<实验目录> --set train.epochs=40
+uv run python eval.py --exp-dir experiments/<实验目录>
+```
 
-# 2) 临时改超参，不动配置文件
-uv run python train.py --config configs/default.yaml --set train.optimizer.lr=5e-4 model.depth=4
+`last.pt` 保存最近完成轮次的训练状态，`best.pt` 保存验证选出的模型，周期档保留最近 `train.ckpt_keep` 个。续训只允许延长总轮数；调度器周期不随之修改。恢复一致性需在目标环境验证。
 
-# 3) 生成一组消融配置（逐一变量），再逐条训练
+默认评估 best.pt 的验证集，结果写入 `eval.json`。其他 split/checkpoint 另存文件；重复同一评估会更新对应文件。此示例没有独立测试集，验证结果不能作为最终测试结果。
+
+## 消融与分析
+
+```bash
 uv run python scripts/make_ablation.py --base configs/default.yaml --mode oat \
     --set loss.name=CombinedLoss --grid loss.alpha=0.0,0.1,0.5,1.0
-uv run python train.py --config configs/ablations/<生成的配置>.yaml   # 对每个配置跑一次
-
-# 4) 汇总与画图
+uv run python train.py --config configs/ablations/<生成的配置>.yaml
 uv run python scripts/analyze.py summary --exp-root experiments
-uv run python scripts/analyze.py curves  --exp-root experiments --metric val_loss
-uv run python scripts/analyze.py sweep   --exp-root experiments --x loss.alpha --y best_val_mse
-
-# 5) 评估某次实验
-uv run python eval.py --exp-dir experiments/<实验目录>
-
-# 6) 断点续训：从某次实验的 last.pt 接着训（中断/加 epoch 都可用）
-uv run python train.py --resume experiments/<实验目录>
+uv run python scripts/analyze.py curves --exp-root experiments --metric val_loss
+uv run python scripts/analyze.py sweep --exp-root experiments --x loss.alpha --y best_val_mse
 ```
 
-训练时用 **tqdm 进度条**实时显示每个 epoch 的 batch 进度与运行平均 loss；
-每个 epoch 自动覆盖一份 `checkpoints/last.pt`，断了用 `--resume` 即可续上。
+分析前确认实验协议一致。脚本提供单次运行汇总和基础图注，不做多种子统计；正式图表需核对指标来源、重复次数和结论。
 
-checkpoint 不做全量累积，磁盘占用可控：`last.pt` 每 epoch 覆盖（含优化器，续训用）、
-`best.pt` 指标刷新时更新（只存权重，评估用）、`epoch_*.pt` 周期档滚动保留最近
-`train.ckpt_keep` 个（旧的自动删，设 0 可全保留）。
+模型、数据、损失分别在 `models/`、`datasets/`、`losses/`；训练循环在 `trainers/`，超参在 `configs/`。方法、实验协议与验证记录写入 `DEVLOG.md`。
 
-## 怎么扩展（关键在解耦）
+## 训练产物滚动保留
 
-加一个新模型只需两步，**训练代码一行不用改**：
+权重位于 `checkpoints/`：`last.pt`、`best.pt` 及最近 `train.ckpt_keep` 个周期档。
+验证结果位于 `evaluations/`：`last.json`、`best.json` 及最近 `train.eval_keep` 个周期档；周期由 `train.eval_interval` 控制。
+两类默认各保留 3 个周期档，另保留 best/last；keep=0 显式保留全部，interval=0 不生成周期档。
 
-1. 在 `models/your_model.py` 写好 `nn.Module`；
-2. 在 `models/__init__.py` 里 `from .your_model import YourModel`，并往 `_MODELS`
-   字典加一行 `"YourModel": YourModel`。
-
-然后把 `configs/default.yaml` 的 `model.name` 改成你的名字、填上构造参数即可。
-数据集、损失同理（`datasets/`、`losses/`）——都是同一个"字典 + build 函数"的写法，
-没有任何隐式魔法，一眼能看懂在哪加、加什么。
-
-## 复现约定
-
-- 所有超参只在 yaml 里；代码不写死数字。
-- 每次运行自动固定种子、保存当时的 `config.yaml` 和配置哈希。
-- 实验命名：`<name>_<时间戳>_<配置哈希>`，看到结果就能找回配置。
-- 提交 `uv.lock`，用 `uv sync` 在任何机器还原同一环境。
+新档写入成功后才清理旧档。CSV 标量历史不删除；正式测试结果单独归档。模板未输出逐样本预测或重建图，真实任务增加这些大文件时需沿用同样的保留规则。

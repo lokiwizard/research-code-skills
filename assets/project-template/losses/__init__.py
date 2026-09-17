@@ -1,6 +1,7 @@
 """损失包：按名字把配置变成损失实例。
 
 新增损失：建文件 + 在下面 import + 往 `_LOSSES` 加一行。
+标准损失（MSE/L1/BCE…）可直接用 torch 自带的类，不必自己包装。
 """
 
 from __future__ import annotations
@@ -9,10 +10,10 @@ from typing import Any, Dict
 
 import torch.nn as nn
 
-from .losses import CombinedLoss, MSELoss
+from .losses import CombinedLoss
 
 _LOSSES = {
-    "MSELoss": MSELoss,
+    "MSELoss": nn.MSELoss,
     "CombinedLoss": CombinedLoss,
 }
 

@@ -3,15 +3,15 @@
 科研里两种常见需求，这里都支持：
 - grid（网格）：所有取值的笛卡尔积，用于超参搜索。
 - oat（one-at-a-time，逐一变量）：每次只改一个超参、其余保持基线，
-  这是"消融实验"的标准做法，能干净地归因每个因素的影响。
+  用于相对固定基线的单因素比较，不能据此排除因素交互。
 
-例子：
+例子（都在项目里用 `uv run` 执行）：
     # 对 lr 和 depth 做网格
-    python scripts/make_ablation.py --base configs/default.yaml \\
+    uv run python scripts/make_ablation.py --base configs/default.yaml \\
         --grid train.optimizer.lr=1e-3,5e-4 model.depth=2,4
 
     # 对 alpha 逐一消融（先把 loss 换成 CombinedLoss）
-    python scripts/make_ablation.py --base configs/default.yaml --mode oat \\
+    uv run python scripts/make_ablation.py --base configs/default.yaml --mode oat \\
         --set loss.name=CombinedLoss --grid loss.alpha=0.0,0.1,0.5,1.0
 
 生成的配置写到 configs/ablations/，文件名编码了被改动的超参，便于后续 analyze.py
@@ -23,6 +23,7 @@ from __future__ import annotations
 import argparse
 import copy
 import itertools
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
@@ -64,8 +65,7 @@ def parse_grid(items: List[str]) -> List[Tuple[str, List[Any]]]:
 
 def _tag(key: str, value: Any) -> str:
     """给文件名/实验名用的短标签，如 'lr=0.0005' -> 'lr0.0005'。"""
-    short = key.split(".")[-1]
-    return f"{short}{value}".replace(" ", "")
+    return re.sub(r"[^A-Za-z0-9_.=-]", "-", f"{key}={value}")
 
 
 def gen_grid(base: Dict[str, Any], grid: List[Tuple[str, List[Any]]],
@@ -123,13 +123,21 @@ def main() -> None:
     configs = gen(base, grid, base_name)
 
     out_dir = Path(args.out_dir)
+    names = [name for name, _ in configs]
+    if len(set(names)) != len(names):
+        raise ValueError("生成的配置名重复，请检查重复取值或文件名字符")
+    for name in names:
+        if Path(name).name != name or name in {".", ".."}:
+            raise ValueError("实验名不能含路径分隔符")
+        if (out_dir / f"{name}.yaml").exists():
+            raise FileExistsError(f"配置已存在：{out_dir / name}；请使用新的输出目录")
     out_dir.mkdir(parents=True, exist_ok=True)
     print(f"生成 {len(configs)} 个配置到 {out_dir}/ （模式：{args.mode}）\n")
     for name, cfg in configs:
         path = out_dir / f"{name}.yaml"
-        with open(path, "w", encoding="utf-8") as f:
+        with open(path, "x", encoding="utf-8") as f:
             yaml.safe_dump(cfg, f, allow_unicode=True, sort_keys=False)
-        print(f"  python train.py --config {path}")
+        print(f"  uv run python train.py --config {path}")
     print("\n逐条运行上面的命令即可跑完整组消融；跑完用 scripts/analyze.py 汇总。")
 
 

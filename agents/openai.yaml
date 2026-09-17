@@ -1,4 +1,4 @@
 interface:
   display_name: "Research Code Skills"
-  short_description: "Scaffold, run, ablate and visualize reproducible PyTorch research code"
-  default_prompt: "Use $research-code-skills to scaffold a modular, reproducible PyTorch research project (models/datasets/losses/trainers/configs/scripts/utils/experiments/results) managed with uv, then help me manage configs/ablations and analyze results into paper-ready figures and captions."
+  short_description: "Implement, validate and reproduce research experiments"
+  default_prompt: "Use $research-code-skills to implement my research method, validate the experiment protocol, and prepare reproducible results."

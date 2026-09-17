@@ -1,24 +1,14 @@
 """损失函数：配置里按名字选用、按字段传超参。
 
-示例给了 MSE 和一个带权重的组合损失，演示"损失也可以有自己的超参"。
-论文里的自定义损失（带正则项、多项加权）按 CombinedLoss 的写法扩展即可。
+标准 MSE 直接用 torch 自带的 nn.MSELoss，不用自己包一层。示例的
+CombinedLoss 演示"多项加权损失 + 可调权重超参"怎么写——论文里的
+自定义损失（带正则项、多项加权）照这个套路扩展即可。
 """
 
 from __future__ import annotations
 
 import torch
 import torch.nn as nn
-
-
-class MSELoss(nn.Module):
-    """标准均方误差损失。"""
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.fn = nn.MSELoss()
-
-    def forward(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
-        return self.fn(pred, target)
 
 
 class CombinedLoss(nn.Module):

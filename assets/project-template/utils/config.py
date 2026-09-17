@@ -1,17 +1,9 @@
-"""配置读写：yaml 为唯一事实来源（single source of truth）。
-
-约定：
-- 一切超参都进 yaml，代码里不写死数字。
-- 支持命令行点号覆盖（`--set train.optimizer.lr=1e-4`），方便快速试参而不改文件。
-- 每次运行都把"最终生效的配置"存进实验目录，并算一个短哈希作为实验指纹，
-  保证"看到结果 -> 找得到当时的配置"。
-"""
+"""读取 YAML、应用命令行覆盖并保存有效配置。"""
 
 from __future__ import annotations
 
 import copy
-import hashlib
-import json
+import math
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -21,11 +13,14 @@ import yaml
 def load_config(path: str | Path) -> Dict[str, Any]:
     """读取 yaml 配置为普通 dict。"""
     with open(path, "r", encoding="utf-8") as f:
-        return yaml.safe_load(f)
+        cfg = yaml.safe_load(f)
+    if not isinstance(cfg, dict):
+        raise ValueError("配置根节点必须是映射")
+    return cfg
 
 
 def save_config(cfg: Dict[str, Any], path: str | Path) -> None:
-    """把配置原样写回 yaml（保留中文、不排序、可读优先）。"""
+    """保存有效配置值；不保留原 YAML 注释。"""
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
         yaml.safe_dump(cfg, f, allow_unicode=True, sort_keys=False)
@@ -64,7 +59,48 @@ def apply_overrides(cfg: Dict[str, Any], overrides: List[str] | None) -> Dict[st
     return cfg
 
 
-def config_hash(cfg: Dict[str, Any], length: int = 6) -> str:
-    """对配置做稳定哈希，作为实验指纹（同配置必得同哈希）。"""
-    blob = json.dumps(cfg, sort_keys=True, ensure_ascii=False).encode("utf-8")
-    return hashlib.md5(blob).hexdigest()[:length]
+def validate_config(cfg: Dict[str, Any]) -> None:
+    """校验入口使用的字段；组件参数由各构造函数检查。"""
+    sections = {"experiment", "model", "dataset", "loss", "train"}
+    if set(cfg) != sections or any(not isinstance(cfg[k], dict) for k in sections):
+        raise ValueError(f"配置必须包含且仅包含 {sorted(sections)} 映射")
+    allowed = {
+        "experiment": {"name", "seed", "output_root"},
+        "train": {"epochs", "batch_size", "optimizer", "scheduler", "val_split",
+                  "split_seed", "num_workers", "pin_memory", "device", "log_interval",
+                  "ckpt_interval", "ckpt_keep", "eval_interval", "eval_keep",
+                  "monitor_metric", "monitor_mode"},
+    }
+    for section, keys in allowed.items():
+        extra = set(cfg[section]) - keys
+        if extra:
+            raise ValueError(f"未知配置项 {section}: {sorted(extra)}")
+    t = cfg["train"]
+    for key in ["epochs", "batch_size"]:
+        if key not in t:
+            raise ValueError(f"缺少 train.{key}")
+    for key in ["epochs", "batch_size", "log_interval", "num_workers", "ckpt_interval",
+                "ckpt_keep", "eval_interval", "eval_keep"]:
+        if key in t:
+            minimum = 1 if key in {"epochs", "batch_size", "log_interval"} else 0
+            if type(t[key]) is not int or t[key] < minimum:
+                raise ValueError(f"train.{key} 必须是 >= {minimum} 的整数")
+    ratio = t.get("val_split", 0.2)
+    if isinstance(ratio, bool) or not isinstance(ratio, (int, float)) or not 0 < ratio < 1:
+        raise ValueError("train.val_split 必须位于 (0, 1)")
+    for section, key in [("experiment", "seed"), ("train", "split_seed")]:
+        if key in cfg[section] and (type(cfg[section][key]) is not int
+                                  or not 0 <= cfg[section][key] < 2**32):
+            raise ValueError(f"{section}.{key} 必须是 [0, 2**32) 内的整数")
+    if t.get("monitor_mode", "min") not in {"min", "max"}:
+        raise ValueError("train.monitor_mode 必须为 min 或 max")
+    def finite(value):
+        if isinstance(value, float) and not math.isfinite(value):
+            raise ValueError("配置不能包含 NaN 或 Inf")
+        if isinstance(value, dict):
+            for item in value.values():
+                finite(item)
+        elif isinstance(value, list):
+            for item in value:
+                finite(item)
+    finite(cfg)

@@ -1,19 +1,8 @@
-"""训练入口：`python train.py --config configs/default.yaml`。
-
-这个文件只做一件事——**装配**：读配置、建实验目录、固定种子、按名字
-搭出 模型/数据/损失，然后交给 Trainer 跑。所有"怎么训"的细节在 trainers/，
-所有"训什么"的细节在 models/ datasets/ losses/，这里保持薄而清晰。
-
-常用：
-    python train.py --config configs/default.yaml
-    python train.py --config configs/default.yaml --set train.optimizer.lr=5e-4 model.depth=4
-    python train.py --resume experiments/baseline_20260624-153000_a1b2c3   # 断点续训
-"""
+"""训练入口：加载配置、构建组件并运行 Trainer。支持从 last.pt 恢复。"""
 
 from __future__ import annotations
 
 import argparse
-import json
 from pathlib import Path
 
 from torch.utils.data import DataLoader
@@ -22,11 +11,13 @@ from datasets import build_dataset, split_train_val
 from losses import build_loss
 from models import build_model
 from trainers import Trainer
+from utils.config import validate_config
+from utils.artifacts import write_json_atomic
+from utils.checkpoint import load_checkpoint
 from utils import (
     apply_overrides,
-    config_hash,
     load_config,
-    make_experiment_name,
+    make_experiment_dir,
     save_config,
     set_seed,
     setup_logger,
@@ -41,7 +32,8 @@ def build_dataloaders(cfg, seed):
     """
     tcfg = cfg["train"]
     dataset = build_dataset(cfg["dataset"])
-    train_set, val_set = split_train_val(dataset, float(tcfg.get("val_split", 0.2)), seed)
+    train_set, val_set = split_train_val(dataset, float(tcfg.get("val_split", 0.2)),
+                                         int(tcfg.get("split_seed", seed)))
 
     loader_kwargs = dict(
         batch_size=int(tcfg["batch_size"]),
@@ -57,32 +49,45 @@ def prepare_experiment(args):
     """根据是否续训，准备好 (配置, 实验目录, 是否续训)。
 
     - 新实验：读配置 + 命令行覆盖，新建带时间戳的实验目录并存下配置。
-    - 续训：复用已有实验目录与其中的 config.yaml（允许 --set 微调，如增大 epochs）。
+    - 续训：复用已有实验目录与其中的 config.yaml（仅允许 --set 延长 epochs）。
     """
     if args.resume:
         exp_dir = Path(args.resume)
         if not (exp_dir / "config.yaml").exists():
             raise SystemExit(f"续训目录里没有 config.yaml：{exp_dir}")
-        cfg = apply_overrides(load_config(exp_dir / "config.yaml"), args.overrides)
-        if args.overrides:
-            # 覆盖项也要落盘，config.yaml 必须始终等于"实际生效的配置"（可追溯原则）
-            save_config(cfg, exp_dir / "config.yaml")
+        original = load_config(exp_dir / "config.yaml")
+        for item in args.overrides:
+            if item.split("=", 1)[0] != "train.epochs":
+                raise SystemExit("续训只允许覆盖 train.epochs；改变训练条件请新建实验")
+        cfg = apply_overrides(original, args.overrides)
+        validate_config(cfg)
+        epochs = cfg["train"]["epochs"]
+        if type(epochs) is not int or epochs < original["train"]["epochs"]:
+            raise SystemExit("续训 train.epochs 必须为整数且不小于原总轮数")
+        if not (exp_dir / "checkpoints" / "last.pt").is_file():
+            raise SystemExit("续训目录缺少 checkpoints/last.pt")
+        state = load_checkpoint(exp_dir / "checkpoints" / "last.pt")
+        saved = state["config"]
+        comparable = apply_overrides(cfg, [f"train.epochs={saved['train']['epochs']}"])
+        if comparable != saved or epochs < state["epoch"]:
+            raise SystemExit("配置与 checkpoint 不一致；恢复原配置或新开实验")
         return cfg, exp_dir, True
 
     if not args.config:
         raise SystemExit("请提供 --config（新实验）或 --resume（续训）")
     cfg = apply_overrides(load_config(args.config), args.overrides)
-    exp_name = make_experiment_name(cfg["experiment"]["name"], config_hash(cfg))
-    exp_dir = Path(cfg["experiment"].get("output_root", "experiments")) / exp_name
-    exp_dir.mkdir(parents=True, exist_ok=True)
+    validate_config(cfg)
+    root = cfg["experiment"].get("output_root", "experiments")
+    exp_dir = make_experiment_dir(root, cfg["experiment"]["name"])
     save_config(cfg, exp_dir / "config.yaml")  # 存下当时生效的完整配置
     return cfg, exp_dir, False
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="训练入口")
-    parser.add_argument("--config", help="yaml 配置路径（新实验必填）")
-    parser.add_argument("--resume", default=None,
+    source = parser.add_mutually_exclusive_group(required=True)
+    source.add_argument("--config", help="yaml 配置路径（新实验必填）")
+    source.add_argument("--resume", default=None,
                         help="断点续训：传入已有实验目录，从 last.pt 接着训")
     parser.add_argument("--set", nargs="*", default=[], dest="overrides",
                         help="命令行覆盖，如 train.optimizer.lr=1e-4 model.depth=4")
@@ -96,7 +101,7 @@ def main() -> None:
     # 2) 复现：固定种子
     set_seed(int(cfg["experiment"]["seed"]))
 
-    # 3) 按名字装配组件（这里完全不出现具体类名，新增组件无需改本文件）
+    # 3) 按配置构建组件
     train_loader, val_loader = build_dataloaders(cfg, int(cfg["experiment"]["seed"]))
     model = build_model(cfg["model"])
     loss_fn = build_loss(cfg["loss"])
@@ -106,11 +111,15 @@ def main() -> None:
     trainer = Trainer(cfg, model, train_loader, val_loader, loss_fn, exp_dir, logger)
     if resuming:
         trainer.resume_from(exp_dir / "checkpoints" / "last.pt")
+        if args.overrides:
+            initial = exp_dir / "config.initial.yaml"
+            if not initial.exists():
+                save_config(load_config(exp_dir / "config.yaml"), initial)
+            save_config(cfg, exp_dir / "config.yaml")
     summary = trainer.fit()
 
     # 5) 落盘最终摘要，供 scripts/analyze.py 汇总
-    with open(exp_dir / "metrics.json", "w", encoding="utf-8") as f:
-        json.dump(summary, f, ensure_ascii=False, indent=2)
+    write_json_atomic(exp_dir / "metrics.json", summary)
 
 
 if __name__ == "__main__":

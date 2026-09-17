@@ -1,21 +1,4 @@
-"""结果分析与可视化：把一堆实验目录变成论文能用的表格、曲线和 caption。
-
-读取每个实验目录里的 config.yaml / metrics.csv / metrics.json / eval.json，
-提供三种产出（对应论文里最常见的三类图表）：
-
-    summary  —— 跨实验的最终指标汇总表（Markdown + CSV）
-    curves   —— 训练曲线（指标 vs epoch），多实验叠加对比
-    sweep    —— 指标 vs 某个超参 的消融曲线；给两个超参则画 3D 消融曲面
-
-例子：
-    python scripts/analyze.py summary --exp-root experiments
-    python scripts/analyze.py curves  --exp-root experiments --metric val_loss
-    python scripts/analyze.py sweep   --exp-root experiments --x loss.alpha --y best_val_mse
-    python scripts/analyze.py sweep   --exp-root experiments --x model.depth --x2 model.hidden_dim --y best_val_mse
-
-每张图都会同时写出一段论文风格的 caption（.md），数字是真实算出来的，
-文字是初稿，你按论文语气微调即可。依赖：matplotlib、numpy、pyyaml。
-"""
+"""读取实验记录，输出汇总表、曲线和图注初稿。比较前需核对实验协议。"""
 
 from __future__ import annotations
 
@@ -165,8 +148,8 @@ def cmd_summary(exps: List[Experiment], out_dir: Path, metrics: List[str]) -> No
           "| " + " | ".join("---" for _ in header) + " |"]
     md += ["| " + " | ".join(r) + " |" for r in table[1:]]
     caption = (
-        "表 1：各实验在验证集上的最终指标对比。每行对应一次独立实验"
-        "（实验名编码了改动的超参），指标取训练结束时的最优值。"
+        "表：每行对应一次运行。指标依次从 metrics.json、eval.json 或 CSV 末行读取；"
+        "数据划分、权重选择与统计口径需结合原始记录核对。"
     )
     (out_dir / "summary.md").write_text(
         "\n".join(md) + "\n\n" + caption + "\n", encoding="utf-8")
@@ -195,7 +178,7 @@ def cmd_curves(exps: List[Experiment], out_dir: Path, metric: str) -> None:
     write_caption(
         out_dir / f"curve_{metric}.md",
         f"图：训练过程中 {metric} 随轮次的变化（共 {plotted} 条曲线，每条对应一个实验）。"
-        f"横轴为 epoch，纵轴为 {metric}；曲线越早收敛、越低（或越高）表示该设置越优。",
+        f"横轴为 epoch，纵轴为 {metric}。不同曲线的预算和评估协议需另行核对。",
     )
 
 
@@ -224,7 +207,10 @@ def cmd_sweep(exps: List[Experiment], out_dir: Path, x: str, y: str,
         xs = [p[0] for p in points]
         ys = [p[2] for p in points]
         fig, ax = plt.subplots(figsize=(6, 4))
-        ax.plot(xs, ys, marker="o")
+        if len(set(xs)) == len(xs):
+            ax.plot(xs, ys, marker="o")
+        else:
+            ax.scatter(xs, ys)
         ax.set_xlabel(x)
         ax.set_ylabel(y)
         ax.set_title(f"{y} vs {x}")
@@ -234,7 +220,7 @@ def cmd_sweep(exps: List[Experiment], out_dir: Path, x: str, y: str,
         write_caption(
             out_dir / f"sweep_{y}_vs_{x.replace('.', '-')}.md",
             f"图：{y} 随超参 {x} 的变化（消融）。在 {x}={xs[best_i]} 时取得"
-            f"最优 {y}={ys[best_i]:.4f}。曲线趋势反映了该超参对性能的影响方向与敏感度。",
+            f"本组记录中的最优 {y}={ys[best_i]:.4f}；未进行重复实验统计。",
         )
     else:
         # 二维：metric 关于两个超参的 3D 曲面（如 α 与 L 的消融）
@@ -243,7 +229,11 @@ def cmd_sweep(exps: List[Experiment], out_dir: Path, x: str, y: str,
         ys = np.array([p[2] for p in points], dtype=float)
         fig = plt.figure(figsize=(7, 5))
         ax = fig.add_subplot(111, projection="3d")
-        ax.plot_trisurf(xs, x2s, ys, cmap="viridis", edgecolor="none", alpha=0.9)
+        coordinates = np.column_stack((xs, x2s))
+        if (len(np.unique(coordinates, axis=0)) == len(xs)
+                and len(xs) >= 3
+                and np.linalg.matrix_rank(coordinates - coordinates[0]) == 2):
+            ax.plot_trisurf(xs, x2s, ys, cmap="viridis", edgecolor="none", alpha=0.9)
         ax.scatter(xs, x2s, ys, color="k", s=15)
         ax.set_xlabel(x)
         ax.set_ylabel(x2)
@@ -256,7 +246,7 @@ def cmd_sweep(exps: List[Experiment], out_dir: Path, x: str, y: str,
             out_path.with_suffix(".md"),
             f"图：{y} 关于 {x} 与 {x2} 的二维消融曲面。最优点出现在 "
             f"{x}={xs[best_i]:g}、{x2}={x2s[best_i]:g} 处（{y}={ys[best_i]:.4f}）。"
-            f"曲面的起伏揭示两超参的交互作用——若沿某一维变化平缓，说明该维不敏感。",
+            f"散点为观测值，曲面（若存在）为插值；该图不独自证明交互作用。",
         )
 
 
